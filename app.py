@@ -1,6 +1,7 @@
 import cv2
 import mediapipe as mp
 import numpy as np
+import time
 
 # Initialize MediaPipe Hands and Drawing Utilities
 mp_hands = mp.solutions.hands
@@ -11,9 +12,25 @@ cap = cv2.VideoCapture(0)
 
 # Memory for storing gestures
 gestures = {}  # Format: {"Gesture Name": [[x1, y1, z1], [x2, y2, z2], ...]}
+phrase = []  # List to store the words of the phrase
+
+# Track last gesture and time
+last_gesture = None
+last_gesture_time = 0
+
+# Function to normalize landmarks
+def normalize_landmarks(landmarks):
+    base_x, base_y, base_z = landmarks[0]  # Use wrist (landmark 0) as the base point
+    normalized = []
+    for x, y, z in landmarks:
+        normalized.append([x - base_x, y - base_y, z - base_z])  # Center the landmarks
+    # Calculate scaling factor (distance between wrist and middle finger tip)
+    max_distance = max(np.linalg.norm(np.array(pt)) for pt in normalized)
+    normalized = [[x / max_distance, y / max_distance, z / max_distance] for x, y, z in normalized]
+    return normalized
 
 # Function to calculate similarity between gestures
-def is_matching_gesture(landmarks, saved_landmarks, threshold=20):
+def is_matching_gesture(landmarks, saved_landmarks, threshold=0.1):
     # Compare the distance between corresponding points
     if len(landmarks) != len(saved_landmarks):
         return False
@@ -50,33 +67,52 @@ with mp_hands.Hands(min_detection_confidence=0.7, min_tracking_confidence=0.7) a
                 # Get coordinates of landmarks
                 for lm in hand_landmarks.landmark:
                     h, w, _ = frame.shape
-                    current_landmarks.append([lm.x * w, lm.y * h, lm.z])
+                    current_landmarks.append([lm.x * w, lm.y * h, lm.z * w])
 
-            # Check for matching gestures
-            matched_gesture = None
-            for gesture_name, saved_landmarks in gestures.items():
-                if is_matching_gesture(current_landmarks, saved_landmarks):
-                    matched_gesture = gesture_name
-                    break
+                # Normalize the current landmarks
+                normalized_landmarks = normalize_landmarks(current_landmarks)
 
-            # Display the matched gesture
-            if matched_gesture:
-                cv2.putText(frame, f"Gesture: {matched_gesture}", (10, 50),
-                            cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+                # Check for matching gestures
+                matched_gesture = None
+                for gesture_name, saved_landmarks in gestures.items():
+                    if is_matching_gesture(normalized_landmarks, saved_landmarks):
+                        matched_gesture = gesture_name
+                        break
+
+                # Handle matched gesture
+                current_time = time.time()
+                if matched_gesture:
+                    # Allow adding the same word if a certain time has passed
+                    if matched_gesture != last_gesture or (current_time - last_gesture_time > 1):  # 1 second delay
+                        phrase.append(matched_gesture)
+                        last_gesture = matched_gesture
+                        last_gesture_time = current_time
+
+                    # Display the matched gesture
+                    cv2.putText(frame, f"Gesture: {matched_gesture}", (10, 50),
+                                cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+
+        # Display the constructed phrase
+        cv2.putText(frame, " ".join(phrase), (10, 80),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
 
         # Instructions for memorizing gestures
-        cv2.putText(frame, "Press 's' to save gesture, 'q' to quit", (10, 30),
+        cv2.putText(frame, "Press 's' to save gesture, 'c' to clear, 'q' to quit", (10, 30),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
 
         # Show the frame
-        cv2.imshow("Hand Gesture Recognition", frame)
+        cv2.imshow("Hand Gesture Phrase Builder", frame)
 
         # Keyboard controls
         key = cv2.waitKey(1) & 0xFF
         if key == ord('s'):  # Save the current gesture
-            gesture_name = input("Enter gesture name: ")
-            gestures[gesture_name] = current_landmarks
-            print(f"Gesture '{gesture_name}' saved!")
+            gesture_name = input("Enter gesture name (word): ")
+            if current_landmarks:
+                gestures[gesture_name] = normalize_landmarks(current_landmarks)
+                print(f"Gesture '{gesture_name}' saved!")
+        elif key == ord('c'):  # Clear the current phrase
+            phrase = []
+            print("Phrase cleared!")
         elif key == ord('q'):  # Quit the application
             break
 
