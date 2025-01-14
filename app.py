@@ -11,7 +11,7 @@ mp_draw = mp.solutions.drawing_utils
 cap = cv2.VideoCapture(0)
 
 # Memory for storing gestures
-gestures = {}  # Format: {"Gesture Name": [[x1, y1, z1], [x2, y2, z2], ...]}
+gestures = {}  # Format: {"Gesture Name": [[[x1, y1, z1], ...], [[x1, y1, z1], ...]]}
 phrase = []  # List to store the words of the phrase
 
 # Track last gesture and time
@@ -30,7 +30,7 @@ def normalize_landmarks(landmarks):
     return normalized
 
 # Function to calculate similarity between gestures
-def is_matching_gesture(landmarks, saved_landmarks, threshold=0.1):
+def is_matching_gesture(landmarks, saved_landmarks, threshold=0.07):
     # Compare the distance between corresponding points
     if len(landmarks) != len(saved_landmarks):
         return False
@@ -74,26 +74,38 @@ with mp_hands.Hands(min_detection_confidence=0.7, min_tracking_confidence=0.7) a
 
                 # Check for matching gestures
                 matched_gesture = None
-                for gesture_name, saved_landmarks in gestures.items():
-                    if is_matching_gesture(normalized_landmarks, saved_landmarks):
-                        matched_gesture = gesture_name
+                for gesture_name, gesture_variants in gestures.items():
+                    for saved_landmarks in gesture_variants:
+                        if is_matching_gesture(normalized_landmarks, saved_landmarks):
+                            matched_gesture = gesture_name
+                            break
+                    if matched_gesture:
                         break
 
                 # Handle matched gesture
                 current_time = time.time()
                 if matched_gesture:
                     # Allow adding the same word if a certain time has passed
-                    if matched_gesture != last_gesture or (current_time - last_gesture_time > 1):  # 1 second delay
+                    if matched_gesture != last_gesture or (current_time - last_gesture_time > 2):  # 2 seconds delay
                         phrase.append(matched_gesture)
                         last_gesture = matched_gesture
                         last_gesture_time = current_time
 
                     # Display the matched gesture
-                    cv2.putText(frame, f"Gesture: {matched_gesture}", (10, 50),
+                    cv2.putText(frame, f"Gesture: {matched_gesture}", (450, 70),
                                 cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
 
-        # Display the constructed phrase
-        cv2.putText(frame, " ".join(phrase), (10, 80),
+        # Display the constructed phrase with a black background
+        phrase_text = "".join(phrase)
+        text_size = cv2.getTextSize(phrase_text, cv2.FONT_HERSHEY_SIMPLEX, 1, 2)[0]
+        text_x, text_y = 10, 100  # Position of the text
+        text_w, text_h = text_size[0], text_size[1]
+
+        # Draw a black rectangle as the background
+        cv2.rectangle(frame, (text_x - 5, text_y - text_h - 5), (text_x + text_w + 5, text_y + 5), (0, 0, 0), -1)
+
+        # Display the phrase text on top of the rectangle
+        cv2.putText(frame, phrase_text, (text_x, text_y),
                     cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
 
         # Instructions for memorizing gestures
@@ -108,8 +120,12 @@ with mp_hands.Hands(min_detection_confidence=0.7, min_tracking_confidence=0.7) a
         if key == ord('s'):  # Save the current gesture
             gesture_name = input("Enter gesture name (word): ")
             if current_landmarks:
-                gestures[gesture_name] = normalize_landmarks(current_landmarks)
-                print(f"Gesture '{gesture_name}' saved!")
+                normalized_gesture = normalize_landmarks(current_landmarks)
+                if gesture_name in gestures:
+                    gestures[gesture_name].append(normalized_gesture)
+                else:
+                    gestures[gesture_name] = [normalized_gesture]
+                print(f"Gesture for '{gesture_name}' saved!")
         elif key == ord('c'):  # Clear the current phrase
             phrase = []
             print("Phrase cleared!")
